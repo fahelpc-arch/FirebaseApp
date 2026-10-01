@@ -4,6 +4,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'firebase_options.dart';
 import 'notification_service.dart';
+import 'auth_gate.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -37,7 +38,8 @@ class MyApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const MyHomePage(title: 'FirebaseApp Home Page'),
+      // CORREÇÃO AQUI: Define o AuthGate como a tela inicial
+      home: const AuthGate(),
     );
   }
 }
