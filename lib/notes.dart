@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package0:cloud_firestore/cloud_firestore.dart';
 
 class NotesPage extends StatefulWidget {
   const NotesPage({super.key});
@@ -10,10 +10,14 @@ class NotesPage extends StatefulWidget {
 }
 
 class _NotesPageState extends State<NotesPage> {
+  final titleController = TextEditingController();
   final createController = TextEditingController();
+
   String? editingId;
+  final inlineTitleController = TextEditingController();
   final inlineController = TextEditingController();
   final inlineFocus = FocusNode();
+
   bool loading = false;
   String? message;
 
@@ -27,27 +31,35 @@ class _NotesPageState extends State<NotesPage> {
 
   @override
   void dispose() {
+    titleController.dispose();
     createController.dispose();
+    inlineTitleController.dispose();
     inlineController.dispose();
     inlineFocus.dispose();
     super.dispose();
   }
 
   Future<void> _add() async {
+    final title = titleController.text.trim();
     final text = createController.text.trim();
+
     if (text.isEmpty) {
       setState(() => message = 'Preencha a descrição.');
       return;
     }
+
     setState(() {
       loading = true;
       message = null;
     });
+
     try {
       await _col.add({
+        'title': title.isEmpty ? 'Sem Título' : title,
         'description': text,
         'createdAt': FieldValue.serverTimestamp(),
       });
+      titleController.clear();
       createController.clear();
     } catch (e) {
       setState(() => message = 'Erro: $e');
@@ -60,6 +72,7 @@ class _NotesPageState extends State<NotesPage> {
     final data = doc.data();
     setState(() {
       editingId = doc.id;
+      inlineTitleController.text = (data?['title'] ?? '').toString();
       inlineController.text = (data?['description'] ?? '').toString();
     });
     Future.microtask(() => inlineFocus.requestFocus());
@@ -68,19 +81,24 @@ class _NotesPageState extends State<NotesPage> {
   void _cancelInlineEdit() {
     setState(() {
       editingId = null;
+      inlineTitleController.clear();
       inlineController.clear();
       inlineFocus.unfocus();
     });
   }
 
   Future<void> _commitInlineEdit(String docId) async {
+    final newTitle = inlineTitleController.text.trim();
     final newText = inlineController.text.trim();
+
     if (newText.isEmpty) {
       setState(() => message = 'A descrição não pode ser vazia.');
       return;
     }
+
     try {
       await _col.doc(docId).update({
+        'title': newTitle.isEmpty ? 'Sem Título' : newTitle,
         'description': newText,
         'updatedAt': FieldValue.serverTimestamp(),
       });
@@ -108,6 +126,7 @@ class _NotesPageState extends State<NotesPage> {
         ],
       ),
     );
+
     if (ok == true) {
       await _col.doc(docId).delete();
       if (editingId == docId) _cancelInlineEdit();
@@ -117,7 +136,10 @@ class _NotesPageState extends State<NotesPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Notas')),
+      appBar: AppBar(
+        title: const Text('Minhas Anotações'),
+        centerTitle: true,
+      ),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 460),
@@ -128,16 +150,30 @@ class _NotesPageState extends State<NotesPage> {
                 child: Column(
                   children: [
                     TextField(
+                      controller: titleController,
+                      decoration: const InputDecoration(
+                        labelText: 'Título (opcional)',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
                       controller: createController,
-                      decoration: const InputDecoration(labelText: 'Descrição'),
+                      decoration: const InputDecoration(
+                        labelText: 'Descrição',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
                       onSubmitted: (_) => _add(),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 12),
                     SizedBox(
                       width: double.infinity,
-                      child: FilledButton(
+                      child: FilledButton.icon(
                         onPressed: loading ? null : _add,
-                        child: const Text('Adicionar'),
+                        icon: const Icon(Icons.add),
+                        label: const Text('Adicionar Nota'),
                       ),
                     ),
                   ],
@@ -146,11 +182,12 @@ class _NotesPageState extends State<NotesPage> {
               if (loading) const CircularProgressIndicator(),
               if (message != null)
                 Padding(
-                  padding: const EdgeInsets.only(top: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Text(
                     message!,
                     style: TextStyle(
-                      color: Theme.of(context).colorScheme.primary,
+                      color: Theme.of(context).colorScheme.error,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
                 ),
@@ -170,29 +207,39 @@ class _NotesPageState extends State<NotesPage> {
                     final docs = snapshot.data?.docs ?? [];
                     if (docs.isEmpty) {
                       return const Center(
-                        child: Text('Nenhuma nota cadastrada.'),
+                        child: Text(
+                          'Nenhuma nota cadastrada.',
+                          style: TextStyle(color: Colors.grey),
+                        ),
                       );
                     }
-                    return ListView.separated(
+                    return ListView.builder(
+                      padding: const EdgeInsets.all(8),
                       itemCount: docs.length,
-                      separatorBuilder: (_, __) => const Divider(height: 0),
                       itemBuilder: (context, i) {
                         final doc = docs[i];
                         final data = doc.data();
                         final isEditing = editingId == doc.id;
+
                         if (isEditing) {
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 6,
-                            ),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: TextField(
-                                    controller: inlineController,
+                          return Card(
+                            margin: const EdgeInsets.symmetric(vertical: 4),
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Column(
+                                children: [
+                                  TextField(
+                                    controller: inlineTitleController,
                                     focusNode: inlineFocus,
-                                    autofocus: true,
+                                    decoration: const InputDecoration(
+                                      labelText: 'Editar título',
+                                      isDense: true,
+                                      border: OutlineInputBorder(),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  TextField(
+                                    controller: inlineController,
                                     decoration: const InputDecoration(
                                       labelText: 'Editar descrição',
                                       isDense: true,
@@ -201,29 +248,47 @@ class _NotesPageState extends State<NotesPage> {
                                     onSubmitted: (_) =>
                                         _commitInlineEdit(doc.id),
                                   ),
-                                ),
-                                const SizedBox(width: 8),
-                                IconButton(
-                                  tooltip: 'Salvar',
-                                  onPressed: () => _commitInlineEdit(doc.id),
-                                  icon: const Icon(Icons.check_circle_outline),
-                                ),
-                                IconButton(
-                                  tooltip: 'Cancelar',
-                                  onPressed: _cancelInlineEdit,
-                                  icon: const Icon(Icons.close),
-                                ),
-                              ],
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.end,
+                                    children: [
+                                      TextButton(
+                                        onPressed: _cancelInlineEdit,
+                                        child: const Text('Cancelar'),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      ElevatedButton(
+                                        onPressed: () =>
+                                            _commitInlineEdit(doc.id),
+                                        child: const Text('Salvar'),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
                             ),
                           );
                         }
-                        return ListTile(
-                          title: Text((data['description'] ?? '').toString()),
-                          onTap: () => _startInlineEdit(doc),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete_outline),
-                            tooltip: 'Remover',
-                            onPressed: () => _remove(doc.id),
+
+                        return Card(
+                          elevation: 2,
+                          margin: const EdgeInsets.symmetric(vertical: 4),
+                          child: ListTile(
+                            title: Text(
+                              (data['title'] ?? 'Sem Título').toString(),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            subtitle: Text(
+                              (data['description'] ?? '').toString(),
+                            ),
+                            onTap: () => _startInlineEdit(doc),
+                            trailing: IconButton(
+                              icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                              tooltip: 'Remover',
+                              onPressed: () => _remove(doc.id),
+                            ),
                           ),
                         );
                       },
