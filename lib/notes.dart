@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package0:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:latlong2/latlong.dart' as ll;
+import 'notifications.dart';
+import 'maps.dart';
 
 class NotesPage extends StatefulWidget {
   const NotesPage({super.key});
@@ -10,14 +13,10 @@ class NotesPage extends StatefulWidget {
 }
 
 class _NotesPageState extends State<NotesPage> {
-  final titleController = TextEditingController();
   final createController = TextEditingController();
-
   String? editingId;
-  final inlineTitleController = TextEditingController();
   final inlineController = TextEditingController();
   final inlineFocus = FocusNode();
-
   bool loading = false;
   String? message;
 
@@ -31,35 +30,33 @@ class _NotesPageState extends State<NotesPage> {
 
   @override
   void dispose() {
-    titleController.dispose();
     createController.dispose();
-    inlineTitleController.dispose();
     inlineController.dispose();
     inlineFocus.dispose();
     super.dispose();
   }
 
   Future<void> _add() async {
-    final title = titleController.text.trim();
     final text = createController.text.trim();
-
     if (text.isEmpty) {
       setState(() => message = 'Preencha a descrição.');
       return;
     }
-
     setState(() {
       loading = true;
       message = null;
     });
-
     try {
-      await _col.add({
-        'title': title.isEmpty ? 'Sem Título' : title,
-        'description': text,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
-      titleController.clear();
+      await _col
+          .add({'description': text, 'createdAt': FieldValue.serverTimestamp()})
+          .then(
+            (note) => Notifications.show(
+              id: note.id.hashCode,
+              title: 'Nota criada',
+              body: text,
+              payload: note.id,
+            ),
+          );
       createController.clear();
     } catch (e) {
       setState(() => message = 'Erro: $e');
@@ -72,7 +69,6 @@ class _NotesPageState extends State<NotesPage> {
     final data = doc.data();
     setState(() {
       editingId = doc.id;
-      inlineTitleController.text = (data?['title'] ?? '').toString();
       inlineController.text = (data?['description'] ?? '').toString();
     });
     Future.microtask(() => inlineFocus.requestFocus());
@@ -81,24 +77,19 @@ class _NotesPageState extends State<NotesPage> {
   void _cancelInlineEdit() {
     setState(() {
       editingId = null;
-      inlineTitleController.clear();
       inlineController.clear();
       inlineFocus.unfocus();
     });
   }
 
   Future<void> _commitInlineEdit(String docId) async {
-    final newTitle = inlineTitleController.text.trim();
     final newText = inlineController.text.trim();
-
     if (newText.isEmpty) {
       setState(() => message = 'A descrição não pode ser vazia.');
       return;
     }
-
     try {
       await _col.doc(docId).update({
-        'title': newTitle.isEmpty ? 'Sem Título' : newTitle,
         'description': newText,
         'updatedAt': FieldValue.serverTimestamp(),
       });
@@ -126,20 +117,48 @@ class _NotesPageState extends State<NotesPage> {
         ],
       ),
     );
-
     if (ok == true) {
       await _col.doc(docId).delete();
       if (editingId == docId) _cancelInlineEdit();
     }
   }
 
+  void _openMapViewer(
+    DocumentReference<Map<String, dynamic>> noteRef,
+    Map<String, dynamic> data,
+  ) {
+    GeoPoint? gp;
+    final pos = data['position'];
+    if (pos is GeoPoint) {
+      gp = pos;
+    } else if (pos is Map && pos['geopoint'] is GeoPoint) {
+      gp = pos['geopoint'] as GeoPoint;
+    }
+    final ll.LatLng? initialLatLng = gp == null
+        ? null
+        : ll.LatLng(gp.latitude, gp.longitude);
+    final double? initialZoom = (data['zoom'] as num?)?.toDouble();
+    final String? initialAddress =
+        (data['address'] as String?)?.trim().isEmpty == true
+        ? null
+        : data['address']?.toString();
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MapViewerEditorPage(
+          noteRef: noteRef,
+          initialLatLng: initialLatLng,
+          initialZoom: initialZoom,
+          initialAddress: initialAddress,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Minhas Anotações'),
-        centerTitle: true,
-      ),
+      appBar: AppBar(title: const Text('Notas')),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 460),
@@ -150,30 +169,16 @@ class _NotesPageState extends State<NotesPage> {
                 child: Column(
                   children: [
                     TextField(
-                      controller: titleController,
-                      decoration: const InputDecoration(
-                        labelText: 'Título (opcional)',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    TextField(
                       controller: createController,
-                      decoration: const InputDecoration(
-                        labelText: 'Descrição',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
+                      decoration: const InputDecoration(labelText: 'Descrição'),
                       onSubmitted: (_) => _add(),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 16),
                     SizedBox(
                       width: double.infinity,
-                      child: FilledButton.icon(
+                      child: FilledButton(
                         onPressed: loading ? null : _add,
-                        icon: const Icon(Icons.add),
-                        label: const Text('Adicionar Nota'),
+                        child: const Text('Adicionar'),
                       ),
                     ),
                   ],
@@ -182,12 +187,11 @@ class _NotesPageState extends State<NotesPage> {
               if (loading) const CircularProgressIndicator(),
               if (message != null)
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  padding: const EdgeInsets.only(top: 12),
                   child: Text(
                     message!,
                     style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.primary,
                     ),
                   ),
                 ),
@@ -207,39 +211,30 @@ class _NotesPageState extends State<NotesPage> {
                     final docs = snapshot.data?.docs ?? [];
                     if (docs.isEmpty) {
                       return const Center(
-                        child: Text(
-                          'Nenhuma nota cadastrada.',
-                          style: TextStyle(color: Colors.grey),
-                        ),
+                        child: Text('Nenhuma nota cadastrada.'),
                       );
                     }
-                    return ListView.builder(
-                      padding: const EdgeInsets.all(8),
+                    return ListView.separated(
                       itemCount: docs.length,
+                      separatorBuilder: (_, __) => const Divider(height: 0),
                       itemBuilder: (context, i) {
                         final doc = docs[i];
                         final data = doc.data();
                         final isEditing = editingId == doc.id;
-
+                        final address = (data['address'] ?? '').toString();
                         if (isEditing) {
-                          return Card(
-                            margin: const EdgeInsets.symmetric(vertical: 4),
-                            child: Padding(
-                              padding: const EdgeInsets.all(12),
-                              child: Column(
-                                children: [
-                                  TextField(
-                                    controller: inlineTitleController,
-                                    focusNode: inlineFocus,
-                                    decoration: const InputDecoration(
-                                      labelText: 'Editar título',
-                                      isDense: true,
-                                      border: OutlineInputBorder(),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  TextField(
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
                                     controller: inlineController,
+                                    focusNode: inlineFocus,
+                                    autofocus: true,
                                     decoration: const InputDecoration(
                                       labelText: 'Editar descrição',
                                       isDense: true,
@@ -248,47 +243,47 @@ class _NotesPageState extends State<NotesPage> {
                                     onSubmitted: (_) =>
                                         _commitInlineEdit(doc.id),
                                   ),
-                                  const SizedBox(height: 8),
-                                  Row(
-                                    mainAxisAlignment: MainAxisAlignment.end,
-                                    children: [
-                                      TextButton(
-                                        onPressed: _cancelInlineEdit,
-                                        child: const Text('Cancelar'),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      ElevatedButton(
-                                        onPressed: () =>
-                                            _commitInlineEdit(doc.id),
-                                        child: const Text('Salvar'),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
+                                ),
+                                const SizedBox(width: 8),
+                                IconButton(
+                                  tooltip: 'Salvar',
+                                  onPressed: () => _commitInlineEdit(doc.id),
+                                  icon: const Icon(Icons.check_circle_outline),
+                                ),
+                                IconButton(
+                                  tooltip: 'Cancelar',
+                                  onPressed: _cancelInlineEdit,
+                                  icon: const Icon(Icons.close),
+                                ),
+                              ],
                             ),
                           );
                         }
-
-                        return Card(
-                          elevation: 2,
-                          margin: const EdgeInsets.symmetric(vertical: 4),
-                          child: ListTile(
-                            title: Text(
-                              (data['title'] ?? 'Sem Título').toString(),
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
+                        return ListTile(
+                          title: Text((data['description'] ?? '').toString()),
+                          subtitle: address.isEmpty
+                              ? null
+                              : Text(
+                                  address,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                          onTap: () => _startInlineEdit(doc),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.map_rounded),
+                                tooltip: 'Mapa',
+                                onPressed: () =>
+                                    _openMapViewer(_col.doc(doc.id), data),
                               ),
-                            ),
-                            subtitle: Text(
-                              (data['description'] ?? '').toString(),
-                            ),
-                            onTap: () => _startInlineEdit(doc),
-                            trailing: IconButton(
-                              icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
-                              tooltip: 'Remover',
-                              onPressed: () => _remove(doc.id),
-                            ),
+                              IconButton(
+                                icon: const Icon(Icons.delete_outline),
+                                tooltip: 'Remover',
+                                onPressed: () => _remove(doc.id),
+                              ),
+                            ],
                           ),
                         );
                       },
