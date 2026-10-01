@@ -1,3 +1,4 @@
+import 'welcome.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -78,6 +79,8 @@ class _MyHomePageState extends State<MyHomePage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
+            const WelcomeMessage(),
+            const SizedBox(height: 30),
             const Text('Você pressionou o botão este número de vezes:'),
             Text(
               '$_counter',
